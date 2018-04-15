@@ -1,33 +1,17 @@
-#include <windows.h>
-
-#include <GL/glut.h>
-#include <GL/glu.h>
-#include <GL/gl.h>
-
-#include <stdlib.h>
-#include <iostream>
-#include <fstream>
-#include <tuple>
-#include <vector>
-#include <algorithm>
-#include <math.h>
-
+#include "glib.hpp"
 using namespace std;
 
-// Classes.
-
-// Defintion of an edge of our polygon. Contains useful coordinates for the scanline.
-class Edges {
-public:
-    GLint minY;
-    GLint maxY;
-    GLint minX;
-    GLint maxX;
-    GLfloat xVal; // X value at the minimum vertex, this is where we start our scanline on the x-axis.
-    GLfloat slope;
-    // Tuples are (x, y).
-    Edges(tuple<GLint, GLint> vertexOne, tuple<GLint, GLint> vertexTwo);
-};
+int X_DOWN;
+GLint scanline;
+bool TOGGLE_STATE;
+bool MOUSE_STATE;
+bool DRAWING; // Enables or disables user input.
+bool EDGE_PARITY;
+vector<tuple<GLint, GLint>> points; // Contains all the vertexes.
+vector<Edges> allEdges; // Contains every Edge.
+vector<Edges> activeEdges; // Contains Edges currently intersecting the scanline.
+RGBType *pixels; // Contains every pixel on the screen.
+int *wH, *wW;
 
 // Calculates neccessary values from two vertexes.
 Edges::Edges(tuple<GLint, GLint> vertexOne, tuple<GLint, GLint> vertexTwo) {
@@ -49,47 +33,7 @@ Edges::Edges(tuple<GLint, GLint> vertexOne, tuple<GLint, GLint> vertexTwo) {
     / static_cast<GLfloat>((get<0>(vertexOne) - get<0>(vertexTwo)));
 }
 
-// Structs.
-
-// Sort Edges by minY values and, if the same, then sort by minX values.
-struct less_than_key
-{
-    inline bool operator() (const Edges& struct1, const Edges& struct2)
-    {
-        if (struct1.minY != struct2.minY)
-            return (struct1.minY < struct2.minY);
-        return (struct1.minX < struct2.minX);
-    }
-};
-
-// Sorts Edges by current x values.
-struct by_x_val_key
-{
-    inline bool operator() (const Edges& struct1, const Edges& struct2)
-    {
-        return (struct1.xVal < struct2.xVal);
-    }
-};
-
-// Stores color data for a single pixel.
-struct RGBType {
-    GLfloat r;
-    GLfloat g;
-    GLfloat b;
-};
-
-// Globals
-int X_DOWN;
-GLint scanline;
-bool TOGGLE_STATE;
-bool MOUSE_STATE;
-bool DRAWING; // Enables or disables user input.
-bool EDGE_PARITY;
-vector<tuple<GLint, GLint>> points; // Contains all the vertexes.
-vector<Edges> allEdges; // Contains every Edge.
-vector<Edges> activeEdges; // Contains Edges currently intersecting the scanline.
-RGBType *pixels; // Contains every pixel on the screen.
-int *wH, *wW;
+// Scanline helper functions
 
 // Draws pixels from (x1, scanline) to (x2, scanline).
 void drawPixels(GLfloat x1, GLfloat x2) {
@@ -103,9 +47,7 @@ void drawPixels(GLfloat x1, GLfloat x2) {
         pixels[i].b = 1;
         pixels[i].g = 1;
     //    glutPostRedisplay();
-   //     printf("change pixel %d, %d\n", (i1 + count), scanline);
     }
-  //  printf("Pixels drawn.\n");
 }
 
 // Removes edges from the Active Edges if the maxY of the edge is the same as the scanline.
@@ -166,7 +108,6 @@ void sortActiveEdgesByXValues() {
 void fillPolygon() {
     while (activeEdges.size() != 0) {
         for (vector<Edges>::iterator it = activeEdges.begin(); it < activeEdges.end(); it++) {
-    //        printf("drawing from %f to %f\n", it->xVal, (it+1)->xVal);
             drawPixels(it->xVal, (it+1)->xVal);
             it++;
         }
@@ -180,9 +121,8 @@ void fillPolygon() {
 }
 
 void init(void) {
-
     //Initialize RGB array
-    delete pixels;
+    delete pixels; //free memory to prevent leaks
     pixels = new RGBType[*wH * *wW];
 
     // Set everything to white initially.
@@ -195,23 +135,6 @@ void init(void) {
     allEdges.clear();
     activeEdges.clear();
 }
-
-// Right click to complete polygon and kick off filling process.
-/* void menu(int id) {
-    switch (id) {
-        case 1:
-            Edges newEdge(points.at(0), points.at(points.size()-1));
-            allEdges.push_back(newEdge);
-            sortAndFilterEdges();
-            initScanline();
-            updateActiveEdges();
-            DRAWING = true;
-            glutPostRedisplay();
-            fillPolygon();
-            break;
-    }
-    glutPostRedisplay();
-} */
 
 void scanFill() {
     sortAndFilterEdges();
@@ -227,19 +150,89 @@ void addEdge(int x1, int y1, int x2, int y2) {
     allEdges.push_back(newEdge);
 }
 
-// Stores vertexes on click.
-/* void mouse_down(int button, int state, int x, int y) {
-    switch (button) {
-        case GLUT_LEFT_BUTTON:
-            if(state == GLUT_DOWN && !DRAWING) {
-                printf("ADDING POINT %d and %d", x, 500 - y);
-                points.push_back(tuple<GLint, GLint>(x, y));
-                if (points.size() > 1) {
-                    Edges newEdge(points.at(points.size()-2), points.at(points.size()-1));
-                    allEdges.push_back(newEdge);
-                }
-                glutPostRedisplay();
-            }
+void drawLine(float X1, float Y1, float X2, float Y2) {
+    float p[2], t = 0;
+
+    if ((X1 == X2) || (Y2 - Y1) / (X2 - X1) > 1) {
+        float temp1 = X1;
+        float temp2 = X2;
+        X1 = Y1;
+        X2 = Y2;
+        Y1 = temp1;
+        Y2 = temp2;
+        t = 1;
     }
-    glutPostRedisplay();
-} */
+
+    glBegin(GL_POINTS);
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    int m_new = 2 * (Y2 - Y1);
+    int slope_error_new = m_new - (X2 - X1);
+    for (int X = X1, Y = Y1; X <= X2; X++)
+    {
+        p[0] = X;
+        p[1] = Y;
+        if (t == 1) {
+            float temp = p[0];
+            p[0] = p[1];
+            p[1] = temp;
+        }
+        glVertex2fv(p);
+
+        slope_error_new += m_new;
+
+        if (slope_error_new >= 0)
+        {
+            Y++;
+            slope_error_new  -= 2 * (X2 - X1);
+        }
+   }
+    glEnd();
+}
+
+void drawCircle(int x_centre, int y_centre, int radius) {
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    int x = radius, y = 0;
+    glBegin(GL_POINTS);
+    glVertex2d(x + x_centre, y + y_centre);
+    if (radius > 0){
+        glVertex2d(x + x_centre, -y + y_centre);
+        glVertex2d(y + x_centre, x + y_centre);
+        glVertex2d(-y + x_centre, x + y_centre);
+    }
+    glEnd();
+    drawLine(-x + x_centre, y_centre, x + x_centre, y_centre);
+    int P = 1 - radius;
+    while (x > y){
+        y++;
+        if (P <= 0)
+            P = P + 2*y + 1;
+        else{
+            x--;
+            P = P + 2*y - 2*x + 1;
+        }
+        if (x < y)
+            break;
+
+        glBegin(GL_POINTS);
+            glVertex2d(x + x_centre, y + y_centre);
+            glVertex2d(-x + x_centre, y + y_centre);
+            glVertex2d(x + x_centre, -y + y_centre);
+            glVertex2d(-x + x_centre, -y + y_centre);
+        glEnd();
+        drawLine(-x + x_centre, y + y_centre, x + x_centre, y + y_centre);
+        drawLine(-x + x_centre, -y + y_centre, x + x_centre, -y + y_centre);
+        if (x != y){
+            glBegin(GL_POINTS);
+                glVertex2d(y + x_centre, x + y_centre);
+                glVertex2d(-y + x_centre, x + y_centre);
+                glVertex2d(y + x_centre, -x + y_centre);
+                glVertex2d(-y + x_centre, -x + y_centre);
+            glEnd();
+            drawLine(-y + x_centre, x + y_centre, y + x_centre, x + y_centre);
+            drawLine(-y + x_centre, -x + y_centre, y + x_centre, -x + y_centre);
+        }
+    }
+}
